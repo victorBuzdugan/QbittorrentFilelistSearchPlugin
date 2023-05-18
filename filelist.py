@@ -1,11 +1,15 @@
 #VERSION: 0.10
 
 # FileList.io search engine plugin for qBittorrent
+# [x] login
+# [x] test login errors
 # [ ] get search results
 # [ ] parse torrent data from search results
 # [ ] return to qBitTorrent data
 # [ ] get search results from all pages
+# [ ] test in qBitTorrent
 # [ ] implement logging
+# [ ] github readme and others
 
 import json
 import re
@@ -17,9 +21,10 @@ from typing import Optional
 from urllib.parse import urlencode
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPCookieProcessor, ProxyHandler, build_opener
+from http.client import HTTPResponse
 
 import sgmllib3
-from helpers import download_file, retrieve_url
+from helpers import download_file
 
 USER_AGENT: tuple = ('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
     'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15')
@@ -46,7 +51,7 @@ except FileNotFoundError:
 # endregion
 
 
-class file_list:
+class filelist:
     ''' filelist.io search class. '''
 
     name = 'FileList'
@@ -72,11 +77,21 @@ class file_list:
     def __init__(self):
         """ Initialize the class. """
 
+        # login
+        self._login()
+
+    
+    def _login(self) -> None:
+        ''' Login to filelist. 
+        
+        Login to filelist passing custom header,
+        cookie with session id from cookie jar and
+        username, password and validator from encoded payload.
+        '''
         # create payload
         self.payload = {
             'unlock': '1',
             'returnto': '%2F',
-            'validator': ''
         }
         self.payload['username'] = credentials['username']
         self.payload['password'] = credentials['password']
@@ -89,19 +104,9 @@ class file_list:
         # and encode to bytes
         self.payload = urlencode(self.payload).encode()
 
-        # login
-        self._login()
-
-    
-    def _login(self) -> None:
-        ''' Login to filelist. 
-        
-        Login to filelist passing custom header,
-        cookie with session id from cookie jar and
-        username, password and validator from encoded payload.
-        '''
-        a = self._make_request(self.url_login_post, data=self.payload)
-        pprint(a)
+        # POST form and login
+        main_page = self._make_request(self.url_login_post, data=self.payload)
+        pprint(main_page)
 
     def _make_request(self, url: str, data=None) -> Optional[str]:
         ''' GET and POST to 'url'.
@@ -110,11 +115,28 @@ class file_list:
         '''
         try:
             with self.session.open(url, data=data, timeout=10) as response:
+                response : HTTPResponse
                 # print(response.url)
                 # print(response.status)
-                return response.read().decode('UTF-8')
+                if response.url == self.url_login_post:
+                    bad_response = response.read().decode('UTF-8', 'replace')
+                    if 'Numarul maxim permis de actiuni' in bad_response:
+                        print('Exceeded maximum number of login attempts. '
+                              'Retry in an hour!')
+                    elif 'User sau parola gresite.' in bad_response:
+                        print('Wrong username or password!')
+                    elif 'Invalid login attempt!' in bad_response:
+                        print('Wrong validator key, or cookie not loaded!')
+                else:
+                    # print('Logged in.')
+                    good_response = response.read()
+                    good_response = good_response.decode('UTF-8', 'replace')
+                    return good_response
         except HTTPError as error:
-            # print(error.status, error.reason)
+            if error.code == 403:
+                print('Bad "user-agent". Header not loaded. '
+                      'Connection refused!')
+            # print(error.code, error.reason)
             pass
         except URLError as error:
             # print(error.reason)
@@ -122,7 +144,6 @@ class file_list:
         except TimeoutError:
             # print("Request timed out")
             pass
-
 
 
     def download_torrent(self, info):
@@ -146,5 +167,5 @@ class file_list:
         `cat` is the name of a search category in ('all', 'movies', 'tv', 'music', 'games', 'anime', 'software', 'pictures', 'books')
         """
 
-
-a = file_list()
+if __name__ == "__main__":
+    a = filelist()
