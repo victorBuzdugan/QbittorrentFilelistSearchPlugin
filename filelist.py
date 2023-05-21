@@ -1,4 +1,7 @@
-#VERSION: 0.10
+#VERSION: 0.20
+#AUTHORS: authors
+
+# LICENSING INFORMATION
 
 # FileList.io search engine plugin for qBittorrent
 # [x] login
@@ -6,24 +9,25 @@
 # [x] get search results
 # [x] get individual results from search results
 # [x] parse torrent data from search results
-# [x] return to qBitTorrent data
+# [x] return to qBitTorrent parsed torrent data
+# [ ] add search plugin to qBitTorrent problems
+# [ ] download_torrent method problems
 # [ ] test in qBitTorrent
-# [ ] download_torrent method?
 # [ ] get search results from all pages
 # [ ] implement logging
 # [ ] github readme and others
 
 import json
+import os
 import re
 from http.client import HTTPResponse
 from http.cookiejar import CookieJar
-from typing import Optional
-import os
+from tempfile import NamedTemporaryFile
+from typing import Optional, Union
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import HTTPCookieProcessor, build_opener
 
-from helpers import download_file
 from novaprinter import prettyPrinter
 
 USER_AGENT: tuple = ('User-Agent', 
@@ -31,7 +35,14 @@ USER_AGENT: tuple = ('User-Agent',
     'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15')
 
 # region: regex patterns
-RE_VALIDATOR = re.compile(r"(?<=name='validator' value=')(.*)(?=' \/>)")
+RE_VALIDATOR = re.compile(r"""
+    # starts with but not including
+    (?<=name='validator'\svalue=')
+    # capture
+    (.*)
+    # ends with but not included
+    (?='\s\/>)
+    """, re.VERBOSE)
 RE_ALL_RESULTS = re.compile(r"""
     # starts with
     <div\sclass='torrentrow'>
@@ -71,25 +82,26 @@ RE_GET_SEEDERS = re.compile(r"""
     \d+
     """, re.VERBOSE)
 RE_GET_LEECHERS = re.compile(
-    r"(?<=<span style='width:45px;height:47px;vertical-align:middle;display:table-cell;'><b>)\d+"
+    r"(?<=vertical-align:middle;display:table-cell;'><b>)\d+"
 )
 # endregion
 
 # region: login credentials
-# enter your login data here or create a json file
+# enter your login data here or in filelist_credentials.json file
 credentials = {
     'username': 'your_username_here',
     'password': 'your_password_here'
 }
+
+FILE_PATH = os.path.dirname(os.path.realpath(__file__))
+CREDENTIALS_FILE = os.path.join(FILE_PATH, 'filelist_credential.json')
 # try to get login credentials from json file if exists
-CREDENTIALS_FILE = os.path.join(
-    os.path.dirname(os.path.realpath(__file__)), 'filelist_credentials.json')
 try:
     with open(CREDENTIALS_FILE, mode='r', encoding='UTF-8') as file:
         # print(f'"{file.name}" found. Credentials loaded.')
         credentials = json.load(file)
 except FileNotFoundError:
-    # print(f'Credentials file not found. Using credentials from current file.')
+    # print(f'Credentials file not found. Using data from current file.')
     pass
 # endregion
 
@@ -97,14 +109,8 @@ except FileNotFoundError:
 class filelist(object):
     ''' filelist.io search class. '''
 
-    name = 'FileList'
     url = 'https://filelist.io/'
-    url_dl = url + 'download.php?id='
-    url_login = url + 'login.php'
-    url_login_post = url + 'takelogin.php'
-    url_search = url + 'browse.php?search'
-    url_details = url + 'details.php?id='
-    url_download = url + 'download.php?id='
+    name = 'FileList'
     supported_categories = {
         'all': '0',
         'movies': '19',
@@ -114,6 +120,12 @@ class filelist(object):
         'anime': '24',
         'software': '8'
     }
+    url_dl = url + 'download.php?id='
+    url_login = url + 'login.php'
+    url_login_post = url + 'takelogin.php'
+    url_search = url + 'browse.php?search'
+    url_details = url + 'details.php?id='
+    url_download = url + 'download.php?id='
     
     # initialize cookie jar
     cj = CookieJar()
@@ -127,7 +139,6 @@ class filelist(object):
         # login
         self._login()
 
-    
     def _login(self) -> None:
         ''' Login to filelist. 
         
@@ -154,7 +165,10 @@ class filelist(object):
         # POST form and login
         main_page = self._make_request(self.url_login_post, data=self.payload)
 
-    def _make_request(self, url: str, data=None) -> Optional[str]:
+    def _make_request(
+            self, url: str,
+            data: Optional[bytes]=None,
+            decode: bool=True) -> Optional[Union [str, bytes]]:
         ''' GET and POST to 'url'.
         
         If 'data' is passed results a POST.
@@ -176,8 +190,10 @@ class filelist(object):
                 else:
                     # print('Logged in.')
                     good_response = response.read()
-                    good_response = good_response.decode('UTF-8', 'replace')
-                    return good_response
+                    if decode:
+                        return good_response.decode('UTF-8', 'replace')
+                    else:
+                        return good_response
         except HTTPError as error:
             if error.code == 403:
                 print('Bad "user-agent". Header not loaded. '
@@ -193,19 +209,29 @@ class filelist(object):
             # print("Request timed out")
             pass
 
-
-    def download_torrent(self, info):
+    def download_torrent(self, url: str) -> None:
         """
         Providing this function is optional.
         It can however be interesting to provide your own torrent download
         implementation in case the search engine in question does not allow
         traditional downloads (for example, cookie-based download).
         """
-        print(download_file(info))
+        # Download url
+        response = self._make_request(url, decode=False)
+
+        # Create a torrent file
+        with NamedTemporaryFile(suffix=".torrent", delete=False) as fd:
+            fd.write(response)
+
+            # return file path
+            print(fd.name + " " + url)
+            return (fd.name + " " + url)
+
+        # print(download_file(url))
 
     # DO NOT CHANGE the name and parameters of this function
     # This function will be the one called by nova2.py
-    def search(self, what: str, cat='all') -> None:
+    def search(self, what: str, cat: str='all') -> None:
         """
         Here you can do what you want to get the result from the search engine website.
         Everytime you parse a result line, store it in a dictionary
@@ -284,53 +310,7 @@ class filelist(object):
 
 if __name__ == "__main__":
     # a = filelist()
-    # a.search('VA - 100 Rock And Roll Classics', 'all')
+    # a.search('ubuntu', 'all')
+    # a.download_torrent('https://filelist.io/download.php?id=60739')
     pass
-
-
-
-
-# with open('FileListResultsRaw.html') as file:
-#     a = file.read()
-
-# torrent_rows = re.finditer(RE_ALL_RESULTS, a)
-
-# def parse_torrent(torrent: str) -> None:
-#     torrent_data = {'engine_url': r"https://filelist.io"}
-#     id = re.search(RE_GET_ID, torrent).group()
-#     # download link
-#     torrent_data['link'] = f'https://filelist.io/download.php?id={id}'
-#     # description page
-#     torrent_data['desc_link'] = f'https://filelist.io/details.php?id={id}'
-#     # name
-#     torrent_data['name'] = re.search(RE_GET_NAME, torrent).group()
-#     # size
-#     size = re.search(RE_GET_SIZE, torrent)
-#     if size:
-#         size = size.groups()
-#         torrent_data['size'] = ' '.join(size)
-#     else:
-#         torrent_data['size'] = -1
-#     # seeders
-#     seeders = re.search(RE_GET_SEEDERS, torrent)
-#     if seeders:
-#         torrent_data['seeds'] = seeders.group()
-#     else:
-#         torrent_data['seeds'] = -1
-#     # leechers
-#     leechers = re.search(RE_GET_LEECHERS, torrent)
-#     if leechers:
-#         torrent_data['leech'] = leechers.group()
-#     else:
-#         torrent_data['leech'] = -1
-
-
-#     prettyPrinter(torrent_data)
-
-
-
-# for torrent in torrent_rows:
-#     parse_torrent(torrent.group())
-
-
 
