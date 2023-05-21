@@ -15,25 +15,22 @@
 
 import json
 import re
-import sys
-from http.cookiejar import CookieJar
-from pathlib import Path
-from pprint import pprint
-from typing import Optional
-from novaprinter import prettyPrinter
-from urllib.parse import urlencode
-from urllib.error import HTTPError, URLError
-from urllib.request import HTTPCookieProcessor, ProxyHandler, build_opener
 from http.client import HTTPResponse
+from http.cookiejar import CookieJar
+from typing import Optional
+import os
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import HTTPCookieProcessor, build_opener
 
-import sgmllib3
 from helpers import download_file
+from novaprinter import prettyPrinter
 
-USER_AGENT: tuple = ('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+USER_AGENT: tuple = ('User-Agent', 
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
     'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15')
 
 # region: regex patterns
-# get validator key from login page 
 RE_VALIDATOR = re.compile(r"(?<=name='validator' value=')(.*)(?=' \/>)")
 RE_ALL_RESULTS = re.compile(r"""
     # starts with
@@ -85,8 +82,10 @@ credentials = {
     'password': 'your_password_here'
 }
 # try to get login credentials from json file if exists
+CREDENTIALS_FILE = os.path.join(
+    os.path.dirname(os.path.realpath(__file__)), 'filelist_credentials.json')
 try:
-    with open('credentials.json', mode='r', encoding='UTF-8') as file:
+    with open(CREDENTIALS_FILE, mode='r', encoding='UTF-8') as file:
         # print(f'"{file.name}" found. Credentials loaded.')
         credentials = json.load(file)
 except FileNotFoundError:
@@ -95,7 +94,7 @@ except FileNotFoundError:
 # endregion
 
 
-class filelist:
+class filelist(object):
     ''' filelist.io search class. '''
 
     name = 'FileList'
