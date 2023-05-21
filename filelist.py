@@ -5,10 +5,11 @@
 # [x] test login errors
 # [x] get search results
 # [x] get individual results from search results
-# [ ] parse torrent data from search results
-# [ ] return to qBitTorrent data
-# [ ] get search results from all pages
+# [x] parse torrent data from search results
+# [x] return to qBitTorrent data
 # [ ] test in qBitTorrent
+# [ ] download_torrent method?
+# [ ] get search results from all pages
 # [ ] implement logging
 # [ ] github readme and others
 
@@ -19,6 +20,7 @@ from http.cookiejar import CookieJar
 from pathlib import Path
 from pprint import pprint
 from typing import Optional
+from novaprinter import prettyPrinter
 from urllib.parse import urlencode
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPCookieProcessor, ProxyHandler, build_opener
@@ -33,12 +35,47 @@ USER_AGENT: tuple = ('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15
 # region: regex patterns
 # get validator key from login page 
 RE_VALIDATOR = re.compile(r"(?<=name='validator' value=')(.*)(?=' \/>)")
-RE_ALL_RESULTS = re.compile(
-    r"""
-    <div\sclass='torrentrow'>                    # starts with
-    [\S\s]*?                                    # any char, including new line
-    <div\sclass='clearfix'><\/div>\s*<\/div>     # ends with
+RE_ALL_RESULTS = re.compile(r"""
+    # starts with
+    <div\sclass='torrentrow'>
+    # any char, including new line
+    [\S\s]*?
+    # ends with
+    <div\sclass='clearfix'><\/div>\s*<\/div>
     """, re.VERBOSE)
+RE_GET_ID = re.compile(r"""
+    # starts with but not including
+    (?<=id=)
+    # one or more digits
+    \d+
+    """, re.VERBOSE)
+RE_GET_NAME = re.compile(r"""
+    # starts with but not including
+    (?<=title=')
+    # one or more characters (excluding new line '.')
+    .+?
+    # ends with '
+    (?=')
+    """, re.VERBOSE)
+RE_GET_SIZE = re.compile(r"""
+    # starts with but not including
+    (?<=<font\sclass='small'>)
+    # catch group 1
+    ([\d.]+)
+    # continues with but not included
+    (?:<br\s\/>)
+    # catch group 2
+    (\w+)
+    """, re.VERBOSE)
+RE_GET_SEEDERS = re.compile(r"""
+    # starts with but not including (hex color 'w{6}')
+    (?<=<font\scolor=\#\w{6}>)
+    # catch digits
+    \d+
+    """, re.VERBOSE)
+RE_GET_LEECHERS = re.compile(
+    r"(?<=<span style='width:45px;height:47px;vertical-align:middle;display:table-cell;'><b>)\d+"
+)
 # endregion
 
 # region: login credentials
@@ -68,6 +105,7 @@ class filelist:
     url_login_post = url + 'takelogin.php'
     url_search = url + 'browse.php?search'
     url_details = url + 'details.php?id='
+    url_download = url + 'download.php?id='
     supported_categories = {
         'all': '0',
         'movies': '19',
@@ -200,40 +238,100 @@ class filelist:
 
         search_results_page = self._make_request(search_link)
         if 'Rezultatele cautarii dupa' in search_results_page:
-            # retutned results page
-            torrent_row = re.finditer(RE_ALL_RESULTS, search_results_page)
-
+            if 'Nu s-a găsit nimic!' not in search_results_page:
+                torrent_rows = re.finditer(RE_ALL_RESULTS, search_results_page)
+                for torrent in torrent_rows:
+                    self._parse_torrent(torrent.group())
+            else:
+                # print('No results found.')
+                pass
         else:
             # print('Cannot access search results page!')
             pass
 
-# You must pass to this function a dictionary containing the following keys
-# (value should be -1 if you do not have the info):
+    def _parse_torrent(self, torrent: str) -> None:
+        """ Get details from torrent and prettyPrint. """
 
-# [ ] link => A string corresponding the the download link (the .torrent file or magnet link)
-# [ ] name => A unicode string corresponding to the torrent's name (i.e: "Ubuntu Linux v6.06")
-# [ ] size => A string corresponding to the torrent size (in bytes???) (i.e: "6 MB" or "200 KB" or "1.2 GB"...)
-# [ ] seeds => The number of seeds for this torrent (as a string)
-# [ ] leech => The number of leechers for this torrent (a a string)
-# [ ] engine_url => The search engine url (i.e: http://www.mininova.org)
-# [ ] desc_link => A string corresponding to the the description page for the torrent
+        torrent_data = {'engine_url': f"{self.url.rstrip('/')}"}
+        id = re.search(RE_GET_ID, torrent).group()
+        # download link
+        torrent_data['link'] = f'{self.url_download}{id}'
+        # description page
+        torrent_data['desc_link'] = f'{self.url_details}{id}'
+        # name
+        torrent_data['name'] = re.search(RE_GET_NAME, torrent).group()
+        # size
+        size = re.search(RE_GET_SIZE, torrent)
+        if size:
+            size = size.groups()
+            torrent_data['size'] = ' '.join(size)
+        else:
+            torrent_data['size'] = -1
+        # seeders
+        seeders = re.search(RE_GET_SEEDERS, torrent)
+        if seeders:
+            torrent_data['seeds'] = seeders.group()
+        else:
+            torrent_data['seeds'] = -1
+        # leechers
+        leechers = re.search(RE_GET_LEECHERS, torrent)
+        if leechers:
+            torrent_data['leech'] = leechers.group()
+        else:
+            torrent_data['leech'] = '0'
 
+        prettyPrinter(torrent_data)
 
 
 if __name__ == "__main__":
-    a = filelist()
-    a.search('mandalorian+s01', 'tv')
+    # a = filelist()
+    # a.search('VA - 100 Rock And Roll Classics', 'all')
     pass
 
-# with open('FileListResults.html') as file:
+
+
+
+# with open('FileListResultsRaw.html') as file:
 #     a = file.read()
 
-# # print(a)
+# torrent_rows = re.finditer(RE_ALL_RESULTS, a)
+
+# def parse_torrent(torrent: str) -> None:
+#     torrent_data = {'engine_url': r"https://filelist.io"}
+#     id = re.search(RE_GET_ID, torrent).group()
+#     # download link
+#     torrent_data['link'] = f'https://filelist.io/download.php?id={id}'
+#     # description page
+#     torrent_data['desc_link'] = f'https://filelist.io/details.php?id={id}'
+#     # name
+#     torrent_data['name'] = re.search(RE_GET_NAME, torrent).group()
+#     # size
+#     size = re.search(RE_GET_SIZE, torrent)
+#     if size:
+#         size = size.groups()
+#         torrent_data['size'] = ' '.join(size)
+#     else:
+#         torrent_data['size'] = -1
+#     # seeders
+#     seeders = re.search(RE_GET_SEEDERS, torrent)
+#     if seeders:
+#         torrent_data['seeds'] = seeders.group()
+#     else:
+#         torrent_data['seeds'] = -1
+#     # leechers
+#     leechers = re.search(RE_GET_LEECHERS, torrent)
+#     if leechers:
+#         torrent_data['leech'] = leechers.group()
+#     else:
+#         torrent_data['leech'] = -1
 
 
-# b = re.finditer(RE_ALL_RESULTS, a)
+#     prettyPrinter(torrent_data)
 
 
-# for i in b:
-#     print(i.group())
+
+# for torrent in torrent_rows:
+#     parse_torrent(torrent.group())
+
+
 
