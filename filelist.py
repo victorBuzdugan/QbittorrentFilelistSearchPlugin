@@ -1,5 +1,6 @@
-#VERSION: 0.30
-#AUTHORS: authors
+#VERSION: 0.90
+#AUTHORS: victorBuzdugan
+# https://github.com/victorBuzdugan/QbittorrentFilelistSearchPlugin
 
 # LICENSING INFORMATION
 
@@ -11,9 +12,10 @@
 # [x] parse torrent data from search results
 # [x] return to qBitTorrent parsed torrent data
 # [x] implement logging
-# [ ] problems adding search plugin to qBitTorrent
-# [ ] download_torrent method problems
-# [ ] test in qBitTorrent
+# [x] problems download_torrent method
+# [x] searching 2 words qBittorrent sends 'word1%20word2' - mandalorian%20s01
+# [x] problems adding search plugin to qBitTorrent
+# [x] test in qBitTorrent
 # [ ] get search results from all pages
 # [ ] github readme and others
 
@@ -34,12 +36,15 @@ from novaprinter import prettyPrinter
 USER_AGENT: tuple = ('User-Agent', 
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
     'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15')
+
 # maximum number of request retries
 MAX_REQ_RETRIES = 3
 
-# logging configuration
+FILE_PATH = os.path.dirname(os.path.realpath(__file__))
+
+# region: logging configuration
 logging.basicConfig(
-    filename='filelist.log',
+    filename=os.path.join(FILE_PATH, 'filelist.log'),
     filemode='w',
     encoding='UTF-8',
     format='%(asctime)s %(levelname)-8s %(message)s',
@@ -47,6 +52,7 @@ logging.basicConfig(
     level=logging.DEBUG
 )
 logger = logging.getLogger(__name__)
+# endregion
 
 # region: LOGIN credentials
 # enter credentials in filelist_credentials.json file
@@ -58,7 +64,6 @@ credentials = {
 }
 
 # try to get login credentials from json file if it exists
-FILE_PATH = os.path.dirname(os.path.realpath(__file__))
 CREDENTIALS_FILE = os.path.join(FILE_PATH, 'filelist_credentials.json')
 try:
     with open(CREDENTIALS_FILE, mode='r', encoding='UTF-8') as file:
@@ -124,7 +129,7 @@ RE_GET_LEECHERS = re.compile(
 class filelist(object):
     ''' filelist.io search class. '''
 
-    url: str = 'https://filelist.io/'
+    url: str = 'https://filelist.io'
     name: str = 'FileList'
     supported_categories: dict = {
         'all': '0',
@@ -135,12 +140,12 @@ class filelist(object):
         'anime': '24',
         'software': '8'
     }
-    url_dl: str = url + 'download.php?id='
-    url_login: str = url + 'login.php'
-    url_login_post: str = url + 'takelogin.php'
-    url_search: str = url + 'browse.php?search'
-    url_details: str = url + 'details.php?id='
-    url_download: str = url + 'download.php?id='
+    url_dl: str = url + '/download.php?id='
+    url_login: str = url + '/login.php'
+    url_login_post: str = url + '/takelogin.php'
+    url_search: str = url + '/browse.php?search'
+    url_details: str = url + '/details.php?id='
+    url_download: str = url + '/download.php?id='
     critical_error: bool = False
     request_retry: int = 0
     
@@ -297,10 +302,10 @@ class filelist(object):
         with NamedTemporaryFile(suffix=".torrent", delete=False) as fd:
             fd.write(response)
 
-            # return file path
+            # return file path and url
             logger.info(f'Returned download to qBittorrent:"{fd.name} {url}"')
             print(fd.name + " " + url)
-            return (fd.name + " " + url)
+            # return (fd.name + " " + url)
 
     def search(self, what: str, cat: str='all') -> None:
         """ Search for torrent and return with prettyPrint(your_dict).
@@ -311,6 +316,8 @@ class filelist(object):
         if self.critical_error:
             self._return_error()
             return
+        
+        what = what.replace('%20', '+')
 
         logger.debug(f'Searching for "{what}" in category "{cat}" ')
 
@@ -332,7 +339,7 @@ class filelist(object):
             ('sort', '5')
         ]
         search_link = urlencode(search_link, safe=':/?+')
-        logger.debug('Encoded url: ', search_link)
+        logger.debug(f'Encoded url: {search_link}')
         # endregion
 
         search_results_page = self._make_request(search_link)
@@ -357,7 +364,7 @@ class filelist(object):
     def _parse_torrent(self, torrent: str) -> None:
         """ Get details from torrent and prettyPrint. """
 
-        torrent_data = {'engine_url': f"{self.url.rstrip('/')}"}
+        torrent_data = {'engine_url': f"{self.url}"}
         id = re.search(RE_GET_ID, torrent).group()
         if not id:
             logger.error('Cannot retrieve torrent id!')
@@ -410,13 +417,13 @@ class filelist(object):
         # intended high seeds, leech and big size to see the error when sorting
         logger.info('Sending critical error to prettyPrinter!')
         prettyPrinter({
-            'engine_url': f'{self.url.rstrip("/")}',
-            "desc_link": f'{self.url.rstrip("/")}',
-            "name": 'CRITICAL error. Check "filelist.log" file',
-            "link": f'{self.url.rstrip("/")}',
-            "size": '1 TB',
-            "seeds": 100,
-            "leech": 100})
+            'engine_url': self.url,
+            'desc_link': 'https://github.com/victorBuzdugan/QbittorrentFilelistSearchPlugin',
+            'name': 'CRITICAL error check log file',
+            'link': self.url + "/error",
+            'size': '1 TB',
+            'seeds': 100,
+            'leech': 100})
         self.critical_error = False
 
 if __name__ == "__main__":
