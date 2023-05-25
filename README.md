@@ -39,8 +39,8 @@ If the scripts finds ```filelist_credentials.json``` in the same directory it wi
 If you intend to input credentials directly in ```filelist.py``` don't use ```filelist_credentials.json```.
 
 ## Folder location
-- Windows: %localappdata%\qBittorrent\nova3\engines\
-- Mac: ~/Library/AppSupport/qBittorrent/nova3/engines/
+- Windows: ```%localappdata%\qBittorrent\nova3\engines\```
+- Mac: ```~/Library/Application Support/qBittorrent/nova3/engines```
 
 ## Logging
 After each search/download the script creates a filelist.log file that you can check if there are problems.
