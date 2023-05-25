@@ -2,5 +2,5 @@
 !.gitignore
 !filelist.py
 !filelist_credentials_model.json
-!filelist.ico
 !filelist.png
+!README.md
