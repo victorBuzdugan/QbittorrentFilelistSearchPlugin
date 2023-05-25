@@ -1,23 +1,10 @@
-#VERSION: 0.90
+#VERSION: 1.00
 #AUTHORS: victorBuzdugan
 # https://github.com/victorBuzdugan/QbittorrentFilelistSearchPlugin
 
 # LICENSING INFORMATION
 
 # FileList.io search engine plugin for qBittorrent
-# [x] login
-# [x] test login errors
-# [x] get search results
-# [x] get individual results from search results
-# [x] parse torrent data from search results
-# [x] return to qBitTorrent parsed torrent data
-# [x] implement logging
-# [x] problems download_torrent method
-# [x] searching 2 words qBittorrent sends 'word1%20word2' - mandalorian%20s01
-# [x] problems adding search plugin to qBitTorrent
-# [x] test in qBitTorrent
-# [ ] get search results from all pages
-# [ ] github readme and others
 
 import json
 import logging
@@ -33,12 +20,15 @@ from urllib.request import HTTPCookieProcessor, build_opener
 
 from novaprinter import prettyPrinter
 
-USER_AGENT: tuple = ('User-Agent', 
+USER_AGENT: tuple = ('User-Agent',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
     'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15')
 
 # maximum number of request retries
 MAX_REQ_RETRIES = 3
+
+# maximum number of search results pages
+MAX_PAGES = 5
 
 FILE_PATH = os.path.dirname(os.path.realpath(__file__))
 
@@ -67,7 +57,7 @@ credentials = {
 CREDENTIALS_FILE = os.path.join(FILE_PATH, 'filelist_credentials.json')
 try:
     with open(CREDENTIALS_FILE, mode='r', encoding='UTF-8') as file:
-        logger.debug(f'Credentials file found. Credentials loaded.')
+        logger.debug('Credentials file found. Credentials loaded.')
         credentials = json.load(file)
 except FileNotFoundError:
     logger.debug('Credentials file not found. Using data from current file.')
@@ -123,10 +113,13 @@ RE_GET_SEEDERS = re.compile(r"""
 RE_GET_LEECHERS = re.compile(
     r"(?<=vertical-align:middle;display:table-cell;'><b>)\d+"
 )
+RE_NEXT_PAGE = re.compile(
+    r"<a href='\?search=[\S]+<font class='small'>&raquo;"
+)
 # endregion
 
 
-class filelist(object):
+class filelist():
     ''' filelist.io search class. '''
 
     url: str = 'https://filelist.io'
@@ -148,7 +141,7 @@ class filelist(object):
     url_download: str = url + '/download.php?id='
     critical_error: bool = False
     request_retry: int = 0
-    
+
     # initialize cookie jar
     cj = CookieJar()
     # initialize an OpenerDirector with the cookie jar attached
@@ -161,8 +154,8 @@ class filelist(object):
         self._login()
 
     def _login(self) -> None:
-        ''' Login to filelist. 
-        
+        ''' Login to filelist.
+
         Login to filelist passing custom header,
         cookie with session id from cookie jar and
         username, password and validator from encoded payload.
@@ -173,7 +166,7 @@ class filelist(object):
             'returnto': '%2F',
         }
         if (credentials['username'] == 'your_username_here' or
-            credentials['password'] == 'your_password_here'):
+                credentials['password'] == 'your_password_here'):
             if credentials['username'] == 'your_username_here':
                 logger.critical('Default username! Change username!')
             else:
@@ -190,7 +183,7 @@ class filelist(object):
             logger.critical("Can't acces login page!")
             self.critical_error = True
             return
-        
+
         self.payload['validator'] = re.search(RE_VALIDATOR, login_page).group()
         if not self.payload['validator']:
             logger.critical('Could not retrieve validator key!')
@@ -198,7 +191,7 @@ class filelist(object):
             return
         else:
             logger.debug('Retrieved validator key.')
-        
+
         # check if cookie is in the jar
         if "PHPSESSID" not in [cookie.name for cookie in self.cj]:
             logger.critical('Could not load cookie!')
@@ -220,17 +213,17 @@ class filelist(object):
     def _make_request(
             self,
             url: str,
-            data: Optional[bytes]=None,
-            decode: bool=True
-            ) -> Optional[Union [str, bytes]]:
+            data: Optional[bytes] = None,
+            decode: bool = True
+            ) -> Optional[Union[str, bytes]]:
         ''' GET and POST to 'url'.
-        
+
         If 'data' is passed results a POST.
         '''
         if data:
-            logger.debug(f'POST data to {url} with {decode = }')
+            logger.debug('POST data to %s with decode = %s', url, decode)
         else:
-            logger.debug(f'GET data from {url} with {decode = }')
+            logger.debug('GET data from %s with decode = %s', url, decode)
 
         if self.request_retry > MAX_REQ_RETRIES:
             self.request_retry = 0
@@ -238,10 +231,10 @@ class filelist(object):
 
         try:
             with self.session.open(url, data=data, timeout=10) as response:
-                response : HTTPResponse
-                logger.debug(f'Response status: {response.status}')
+                response: HTTPResponse
+                logger.debug('Response status: %s', response.status)
                 if response.url == self.url_login_post:
-                    logger.critical(f'Redirected to error page!')
+                    logger.critical('Redirected to error page!')
                     bad_response = response.read().decode('UTF-8', 'replace')
                     if 'Numarul maxim permis de actiuni' in bad_response:
                         logger.error('Exceeded maximum number of '
@@ -250,7 +243,7 @@ class filelist(object):
                         logger.error('Wrong username and/or password!')
                     elif 'Invalid login attempt!' in bad_response:
                         logger.error('Wrong validator key '
-                                      'or cookie not loaded!')
+                                     'or cookie not loaded!')
                     self.critical_error = True
                     return
                 else:
@@ -266,28 +259,28 @@ class filelist(object):
         except HTTPError as error:
             if error.code == 403:
                 logger.critical('Error 403: Connection refused! '
-                                 'Bad "user-agent" or header not loaded.')
+                                'Bad "user-agent" or header not loaded.')
                 self.critical_error = True
                 return
             if error.code == 404:
                 logger.error('Error 404: Page not found!')
                 self.request_retry += 1
-                logger.debug(f'Retry {self.request_retry}/{MAX_REQ_RETRIES}')
+                logger.debug('Retry %d/%d', self.request_retry, MAX_REQ_RETRIES)
                 return self._make_request(url, data, decode)
         except URLError as error:
             logger.error(error.reason)
             self.request_retry += 1
-            logger.debug(f'Retry {self.request_retry}/{MAX_REQ_RETRIES}')
+            logger.debug('Retry %d/%d', self.request_retry, MAX_REQ_RETRIES)
             return self._make_request(url, data, decode)
         except TimeoutError:
             logger.error('Request timed out')
             self.request_retry += 1
-            logger.debug(f'Retry {self.request_retry}/{MAX_REQ_RETRIES}')
+            logger.debug('Retry %d/%d', self.request_retry, MAX_REQ_RETRIES)
             return self._make_request(url, data, decode)
 
     def download_torrent(self, url: str) -> None:
         """ Return download link to qBittorrent. """
-        
+
         if self.critical_error:
             self._return_error()
             return
@@ -299,15 +292,15 @@ class filelist(object):
             return
 
         # Create a torrent file
-        with NamedTemporaryFile(suffix=".torrent", delete=False) as fd:
-            fd.write(response)
+        with NamedTemporaryFile(suffix=".torrent", delete=False) as temp_file:
+            temp_file.write(response)
 
             # return file path and url
-            logger.info(f'Returned download to qBittorrent:"{fd.name} {url}"')
-            print(fd.name + " " + url)
+            logger.info('Returned to qBittorrent:"%s %s"', temp_file.name, url)
+            print(temp_file.name + " " + url)
             # return (fd.name + " " + url)
 
-    def search(self, what: str, cat: str='all') -> None:
+    def search(self, what: str, cat: str = 'all') -> None:
         """ Search for torrent and return with prettyPrint(your_dict).
 
         `what` to search for
@@ -316,63 +309,78 @@ class filelist(object):
         if self.critical_error:
             self._return_error()
             return
-        
+
         what = what.replace('%20', '+')
 
-        logger.debug(f'Searching for "{what}" in category "{cat}" ')
+        logger.debug('Searching for "%s" in category "%s"', what, cat)
 
         if cat not in self.supported_categories:
-            logger.warning(f'Category "{cat}" not found, defaulting to "all".')
+            logger.warning('Category "%s" not found, setting to "all".', cat)
             cat = 'all'
 
-        # region: create search url
-        # create a list of tuples for urlencode
-        search_link = [
-            # ('https://filelist.io/browse.php?search', search_string)
-            (self.url_search, what),
-            # category
-            ('cat', self.supported_categories[cat]),
-            # 0: Name & Description, 1: Name, 2: Description, 3: IMDB id
-            ('searchin', '1'),
-            # 0: Hybrid, 1: Relevance, 2: Date, 3: Size, 
-            # 4: Downloads, 5:Seeders
-            ('sort', '5')
-        ]
-        search_link = urlencode(search_link, safe=':/?+')
-        logger.debug(f'Encoded url: {search_link}')
-        # endregion
+        def create_search_link(page_no: int = 0) -> str:
+            ''' Creates a search link based on page number. '''
 
-        search_results_page = self._make_request(search_link)
-        if not search_results_page:
-            logger.error('Cannot access results page!')
-        if 'Rezultatele cautarii dupa' in search_results_page:
-            logger.debug('Accessed results page.')
-            if 'Nu s-a găsit nimic!' not in search_results_page:
-                torrent_rows = re.finditer(RE_ALL_RESULTS, search_results_page)
-                total_results = 0
-                for torrent in torrent_rows:
-                    self._parse_torrent(torrent.group())
-                    total_results += 1
+            # create a list of tuples for urlencode
+            search_link = [
+                # ('https://filelist.io/browse.php?search', search_string)
+                (self.url_search, what),
+                # category
+                ('cat', self.supported_categories[cat]),
+                # 0: Name & Description, 1: Name, 2: Description, 3: IMDB id
+                ('searchin', '1'),
+                # 0: Hybrid, 1: Relevance, 2: Date, 3: Size,
+                # 4: Downloads, 5:Seeders
+                ('sort', '5'),
+                ('page', str(page_no))
+            ]
+            search_link = urlencode(search_link, safe=':/?+')
+            logger.debug('Encoded url: %s', search_link)
+            return search_link
+
+        page_no = 0
+        total_results = 0
+        while page_no < MAX_PAGES:
+            logger.debug('Requesting page number %d', page_no)
+            search_page = self._make_request(create_search_link(page_no))
+            if not search_page:
+                logger.error('Cannot access results page!')
+                break
+            if 'Rezultatele cautarii dupa' in search_page:
+                logger.info('Accessed results page.')
+                if 'Nu s-a găsit nimic!' not in search_page:
+                    torrent_rows = re.finditer(RE_ALL_RESULTS, search_page)
+                    for torrent in torrent_rows:
+                        self._parse_torrent(torrent.group())
+                        total_results += 1
+                    # check if there is a next page
+                    # every page has 20 elements
+                    # '»' signals there is a next page
+                    if ((total_results % 20 == 0) and
+                            re.search(RE_NEXT_PAGE, search_page)):
+                        page_no += 1
+                    else:
+                        break
                 else:
-                    logger.info(f'Parsed {total_results} torrents.')
+                    logger.info('No results found.')
+                    break
             else:
-                logger.debug('No results found.')
-        else:
-            logger.error('Cannot access results page!')
-            pass
+                logger.error('Cannot access results page!')
+                break
+        logger.info('Parsed %d torrents.', total_results)
 
     def _parse_torrent(self, torrent: str) -> None:
         """ Get details from torrent and prettyPrint. """
 
         torrent_data = {'engine_url': f"{self.url}"}
-        id = re.search(RE_GET_ID, torrent).group()
-        if not id:
+        tid = re.search(RE_GET_ID, torrent).group()
+        if not tid:
             logger.error('Cannot retrieve torrent id!')
             return
         # download link
-        torrent_data['link'] = f'{self.url_download}{id}'
+        torrent_data['link'] = f'{self.url_download}{tid}'
         # description page
-        torrent_data['desc_link'] = f'{self.url_details}{id}'
+        torrent_data['desc_link'] = f'{self.url_details}{tid}'
         # name
         torrent_data['name'] = re.search(RE_GET_NAME, torrent).group()
         if not torrent_data['name']:
@@ -383,7 +391,7 @@ class filelist(object):
         if size:
             size = size.groups()
             torrent_data['size'] = ' '.join(size)
-            logger.debug(f"Torrent size: {torrent_data['size']}")
+            logger.debug("Torrent size: %s", torrent_data['size'])
         else:
             logger.debug('Could not retrieve torrent size. Setting -1.')
             torrent_data['size'] = -1
@@ -402,15 +410,14 @@ class filelist(object):
             logger.debug('Could not retrieve number of leechers. Setting 0.')
             torrent_data['leech'] = '0'
 
-        logger.info(f'Sending to prettyPrinter:'
-                     f' {torrent_data["link"]} |'
-                     f' {torrent_data["name"]} |'
-                     f' {torrent_data["size"]} |'
-                     f' {torrent_data["seeds"]} |'
-                     f' {torrent_data["leech"]} |'
-                     f' {torrent_data["engine_url"]} |'
-                     f' {torrent_data["desc_link"]}'
-                     )
+        logger.info('Sending to prettyPrinter: %s|%s|%s|%s|%s|%s|%s|',
+                    torrent_data["link"],
+                    torrent_data["name"],
+                    torrent_data["seeds"],
+                    torrent_data["size"],
+                    torrent_data["leech"],
+                    torrent_data["engine_url"],
+                    torrent_data["desc_link"])
         prettyPrinter(torrent_data)
 
     def _return_error(self) -> None:
@@ -426,9 +433,9 @@ class filelist(object):
             'leech': 100})
         self.critical_error = False
 
-if __name__ == "__main__":
-    # a = filelist()
-    # a.search('ubuntu', 'all')
-    # a.download_torrent('https://filelist.io/download.php?id=60739')
-    pass
 
+if __name__ == "__main__":
+    # test = filelist()
+    # test.search('linux', 'all')
+    # test.download_torrent('https://filelist.io/download.php?id=60739')
+    pass

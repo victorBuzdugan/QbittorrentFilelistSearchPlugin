@@ -46,5 +46,4 @@ If you intend to input credentials directly in ```filelist.py``` don't use ```fi
 After each search/download the script creates a filelist.log file that you can check if there are problems.
 
 ## To do list
-- [ ] get search results from all pages; currently returning results only from the first page
 - [ ] further testing
