@@ -36,8 +36,7 @@ FILE_PATH = os.path.dirname(os.path.realpath(__file__))
 logging.basicConfig(
     filename=os.path.join(FILE_PATH, 'filelist.log'),
     filemode='w',
-    # qBittorrent installs Python 3.8 by default; encoding was introduced in 3.9
-    # encoding='UTF-8',
+    encoding='UTF-8',
     format='%(asctime)s %(levelname)-8s %(message)s',
     datefmt='%d.%m %H:%M:%S',
     level=logging.DEBUG
